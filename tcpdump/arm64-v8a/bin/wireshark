@@ -1,0 +1,54 @@
+#!/bin/bash
+
+#------------------------------------------------------------------------------
+
+ARCH=arm64-v8a
+
+#------------------------------------------------------------------------------
+
+capture() {
+    IFACE=$1
+    ADB_OPT=$2
+    echo "Capturing ${IFACE}..."
+    adb ${ADB_OPT} shell "/data/local/tmp/tcpdump -i ${IFACE} -U -w - 2>/dev/null" | wireshark -o "gui.window_title:${ARCH} - ${IFACE}" -k -S -i - 2>/dev/null
+    echo "adb shell ${ADB_OPT} \"/data/local/tmp/tcpdump -i ${IFACE} -U -w - 2>/dev/null\" | wireshark -o \"gui.window_title:${ARCH} - ${IFACE}\" -k -S -i - 2>/dev/null"
+}
+
+#------------------------------------------------------------------------------
+
+usage() {
+    echo "Usage: $(basename $0) -i <interface>"
+    echo "  -i <interface>            name of interface (default 'any')"
+    echo "  -s <serial>               use device with given serial (overrides $ANDROID_SERIAL)"
+    echo "  -h                        print this help"
+    exit 2
+}
+
+#------------------------------------------------------------------------------
+
+IFACE="any"
+
+ADB_OPT=""
+
+while getopts 'i:s:h' opt
+do
+    case $opt in
+    i)
+        IFACE="${OPTARG}"
+        ;;
+    s)
+        ADB_OPT+="-s ${OPTARG}"
+        ;;
+    h)
+        usage
+        ;;
+    *)
+        echo "Error: invalid command line option"
+        usage
+        exit 2
+        ;;
+    esac
+done
+
+capture "${IFACE}" "${ADB_OPT}"
+

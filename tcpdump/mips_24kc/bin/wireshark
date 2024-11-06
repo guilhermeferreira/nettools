@@ -1,0 +1,96 @@
+#!/bin/bash
+
+#------------------------------------------------------------------------------
+
+ARCH=mips_24kc
+TOOLS_PATH=$(dirname $0)/../../../
+
+# __qalab11
+#ROUTER_ADDR=192.168.11.1
+# __qalab12
+ROUTER_ADDR=192.168.12.1
+ROUTER_USER=root
+ROUTER_PWD=#__qalab123456#
+ROUTER_EXEC=${TOOLS_PATH}openwrt/${ARCH}/bin/router_exec.tcl
+
+HOST_ADDR=$(ip route get ${ROUTER_ADDR} | sed 's/.*src \([0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}\) .*/\1/g' | head -n1)
+HOST_PORT=2222
+
+#------------------------------------------------------------------------------
+
+wifi_up() {
+    ${ROUTER_EXEC} "ssh ${ROUTER_USER}@${ROUTER_ADDR} 'uci set wireless.radio0.disabled=0; wifi up'" "${ROUTER_PWD}"
+}
+
+#------------------------------------------------------------------------------
+
+dump_tools() {
+    ${ROUTER_EXEC} "scp ${TOOLS_PATH}/tcpdump/${ARCH}/sbin/tcpdump ${ROUTER_USER}@${ROUTER_ADDR}:/tmp/" "${ROUTER_PWD}"
+    ${ROUTER_EXEC} "scp ${TOOLS_PATH}/ncat/${ARCH}/bin/ncat ${ROUTER_USER}@${ROUTER_ADDR}:/tmp/" "${ROUTER_PWD}"
+}
+
+#------------------------------------------------------------------------------
+
+setup() {
+    echo "Setting up..."
+    LOCK_FILE=/tmp/wireshark.${ROUTER_ADDR}.lock
+    ${ROUTER_EXEC} "scp ${ROUTER_USER}@${ROUTER_ADDR}:${LOCK_FILE} /tmp" "${ROUTER_PWD}"
+    cat ${LOCK_FILE}
+    RES=$(echo $?)
+    if [ $RES -ne 0 ]; then
+        echo "Running for the 1st time..."
+        wifi_up
+        dump_tools
+        ${ROUTER_EXEC} "ssh ${ROUTER_USER}@${ROUTER_ADDR} 'touch ${LOCK_FILE}'" "${ROUTER_PWD}"
+    fi
+    rm -Rf ${LOCK_FILE}
+    echo "done."
+}
+
+#------------------------------------------------------------------------------
+
+capture() {
+    IFACE=$1
+
+    killall ncat
+
+    echo "Listening @ host '${HOST_ADDR}:${HOST_PORT}'..."
+    ( ncat -l ${HOST_PORT} | wireshark -o "gui.window_title:${ARCH} - ${IFACE}" -k -S -i - 2>/dev/null &)
+
+    echo "Capturing @ router '${ROUTER_ADDR}' interface '${IFACE}'..."
+    ${ROUTER_EXEC} "ssh ${ROUTER_USER}@${ROUTER_ADDR} '/tmp/tcpdump -i ${IFACE} -w - | /tmp/ncat ${HOST_ADDR} ${HOST_PORT}'" "${ROUTER_PWD}"
+}
+
+#------------------------------------------------------------------------------
+
+usage() {
+    echo "Usage: $(basename $0) -i <interface> [-d]"
+    echo "  -i <interface>            name of interface (default 'any')"
+    echo "  -h                        print this help"
+    exit 2
+}
+
+#------------------------------------------------------------------------------
+
+IFACE="any"
+
+while getopts 'i:dh' opt
+do
+    case $opt in
+    i)
+        IFACE="${OPTARG}"
+        ;;
+    h)
+        usage
+        ;;
+    *)
+        echo "Error: invalid command line option"
+        usage
+        exit 2
+        ;;
+    esac
+done
+
+setup
+capture ${IFACE}
+
